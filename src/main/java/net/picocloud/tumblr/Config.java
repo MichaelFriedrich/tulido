@@ -4,19 +4,59 @@ import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.chrome.ChromeDriver;
 import org.openqa.selenium.firefox.FirefoxDriver;
 
+
+/**
+ * Command line configuration parsing and checking
+ */
 public class Config {
+    /**
+     * tumblr.com user name
+     */
     String username;
+
+    /**
+     * tumblr.com password
+     */
     String password;
+
+    /**
+     * tumblr.com blog to get the likes from
+     */
     String blogname;
 
     WebDriver driver = null;
 
+    /**
+     * is the configuration valid?
+     */
     boolean valid = true;
+
+    /**
+     * should the pages with the liked posts saved as html files?
+     */
     boolean pages = true;
+
+    /**
+     * shall the video.txt file be generated?
+     */
     boolean vids = true;
+
+    /**
+     * shall the posts.txt file be generated?
+     */
     boolean posts = true;
+
+    /**
+     * shall the pics.txt file be generated?
+     */
     boolean pics = true;
 
+    /**
+     * Creates the configuration
+     *
+     * @param args the first three arguements are: user, password, blogname in this order. The following arguments are optional and there is no specific order.
+     *             Every arguemtn can only be passed once (though it is not always enforced).
+     */
     public Config(String... args) {
         if (args.length < 3 || !args[0].contains("@")) {
             valid = false;
