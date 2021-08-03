@@ -130,9 +130,9 @@ public class TumblrLikeDownloader {
             if (config.pages) {
                 var pathElements = driver.getCurrentUrl().split("/");
                 var name = pathElements[pathElements.length - 3] + pathElements[pathElements.length - 2] + ".html";
-                var fw = new FileWriter(name);
-                fw.write(driver.getPageSource());
-                fw.close();
+                try (var fw = new FileWriter(name)) {
+                    fw.write(driver.getPageSource());
+                }
             }
             if (!loadNextPage(time) || hasElement(driver, By.className("no_posts_found"))) { // retry
                 for (int i = 0; i < 3 && hasElement(driver, By.className("no_posts_found")); i++) {
@@ -176,7 +176,7 @@ public class TumblrLikeDownloader {
             try {
                 Thread.sleep(1000);
             } catch (InterruptedException e) {
-                // ignore
+                Thread.currentThread().interrupt();
             }
         }
     }
