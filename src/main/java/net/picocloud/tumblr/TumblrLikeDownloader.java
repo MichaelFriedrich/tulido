@@ -8,25 +8,36 @@ import org.openqa.selenium.interactions.Actions;
 import org.openqa.selenium.support.ui.ExpectedConditions;
 import org.openqa.selenium.support.ui.WebDriverWait;
 
+import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.util.List;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 public class TumblrLikeDownloader {
+
+    private static final Logger logger = Logger.getLogger(TumblrLikeDownloader.class.getName());
+
+    private static final String PAGES = "pages";
+    private static final String POSTS_TXT = "posts.txt";
+    private static final String PICS_TXT = "pics.txt";
+    private static final String VIDS_TXT = "videos.txt";
+    public static final String VIDS = "videos";
+    public static final String PICS = "pics";
+
     private final Config config;
-    private final WebDriver driver ;
+    private final WebDriver driver;
 
     public TumblrLikeDownloader(Config config) {
         this.driver = config.driver;
         this.config = config;
     }
 
-
-
     public static void main(String[] args) throws IOException {
         Config config = new Config(args);
         if (!config.isValid()) {
-            printUsage();
+            Config.printUsage();
             return;
         }
 
@@ -36,24 +47,6 @@ public class TumblrLikeDownloader {
         llt.tearDown();
     }
 
-    static void printUsage() {
-        System.out.println("Usage:\n" +
-                "java -jar tulido.jar <username> <password> <blogname> [<options> ...]\n" +
-                "Options:\n" +
-                "-pages   : do not create all like pages\n" +
-                "-vids    : do not create vids.txt\n" +
-                "-posts   : do not create posts.txt\n" +
-                "-pics    : do not create pics.txt\n" +
-                "-firefox : use Firefox (excludes: -chrome)\n" +
-                "-chrome  : use Chrome (default, excludes: -firefox)" +
-                "Downloads all likes from the tumblr blog <blogname> with the given <username> and <password>.\n" +
-                "If no options are given, the following files are created:\n" +
-                "- directory pages containing all pages with the likes as html files,\n" +
-                "- pics.txt containing all the urls of the pictures liked,\n" +
-                "- posts.txt containing all the urls of the posts liked,\n" +
-                "- vids.txt containing all the urls of the videos liked.\n" +
-                "\nYou can download the pictures or other files with \"cat xxx.txt | xargs wget\"");
-    }
 
     public void tearDown() {
         driver.quit();
@@ -91,18 +84,28 @@ public class TumblrLikeDownloader {
 
     public void loadLikes() throws IOException {
         // open files
-
+        MediaLoader mediaLoader = null;
         FileWriter postFile = null;
         FileWriter picFile = null;
         FileWriter vidFile = null;
 
-        if (config.posts)
-            postFile = new FileWriter("posts.txt");
-        if (config.pics)
-            picFile = new FileWriter("pics.txt");
-        if (config.vids)
-            vidFile = new FileWriter("vids.txt");
+        Config.createTargetDir(config.destPath);
 
+        if (config.posts)
+            postFile = new FileWriter(config.destPath + POSTS_TXT);
+        if (config.pics)
+            picFile = new FileWriter(config.destPath + PICS_TXT);
+        if (config.vids)
+            vidFile = new FileWriter(config.destPath + VIDS_TXT);
+        if (config.pages)
+            Config.createTargetDir(config.destPath + File.separatorChar + PAGES);
+        if (config.downloadMedia) {
+            mediaLoader = new MediaLoader();
+            if (config.pics)
+                Config.createTargetDir(config.destPath + File.separatorChar + PICS);
+            if (config.vids)
+                Config.createTargetDir(config.destPath + File.separatorChar + VIDS);
+        }
 
         // open page likes
         driver.get("https://www.tumblr.com/liked/by/" + config.blogname);
@@ -120,23 +123,31 @@ public class TumblrLikeDownloader {
             // Get Pictures
             if (config.pics) {
                 var pics = driver.findElements(By.className("post_media_photo"));
-                writeAttributes(picFile, pics, "src");
+                var urls = writeAttributes(picFile, pics, "src");
+                if (config.downloadMedia) {
+                    mediaLoader.getMedia(config.destPath + PICS, urls);
+                }
             }
             // Get Videos
             if (config.vids) {
                 var vids = driver.findElements(By.xpath("//video/source"));
-                writeAttributes(vidFile, vids, "src");
+                var urls = writeAttributes(vidFile, vids, "src");
+                if (config.downloadMedia) {
+                    mediaLoader.getMedia(config.destPath + VIDS, urls);
+                }
             }
             if (config.pages) {
                 var pathElements = driver.getCurrentUrl().split("/");
                 var name = pathElements[pathElements.length - 3] + pathElements[pathElements.length - 2] + ".html";
-                var fw = new FileWriter(name);
-                fw.write(driver.getPageSource());
-                fw.close();
+                if ("likedby.html".equals(name))
+                    name = "page1.html";
+                try (var fw = new FileWriter(config.destPath  + PAGES + File.separator + name)) {
+                    fw.write(driver.getPageSource());
+                }
             }
             if (!loadNextPage(time) || hasElement(driver, By.className("no_posts_found"))) { // retry
                 for (int i = 0; i < 3 && hasElement(driver, By.className("no_posts_found")); i++) {
-                    System.out.println("Waiting for 7 seconds (" + i + "/3)");
+                    logger.log(Level.INFO,"Waiting for 7 seconds ({0}/3)",i);
                     sleep(7);
                 }
                 if (!loadNextPage(time))
@@ -149,7 +160,7 @@ public class TumblrLikeDownloader {
         if (postFile != null)
             postFile.close();
         if (picFile != null)
-             picFile.close();
+            picFile.close();
         if (vidFile != null)
             vidFile.close();
 
@@ -160,7 +171,7 @@ public class TumblrLikeDownloader {
     private boolean loadNextPage(long time) {
         if (driver.findElements(By.id("next_page_link")).size() > 0) { // next page exists
             driver.get(driver.findElement(By.id("next_page_link")).getAttribute("href"));
-            System.out.println("Analyzing " + getDurationString(time));
+            logger.info(()->"Analyzing " + getDurationString(time));
             return true;
         }
         return false;
@@ -176,7 +187,7 @@ public class TumblrLikeDownloader {
             try {
                 Thread.sleep(1000);
             } catch (InterruptedException e) {
-                // ignore
+                Thread.currentThread().interrupt();
             }
         }
     }
@@ -190,11 +201,15 @@ public class TumblrLikeDownloader {
         return true;
     }
 
-    private void writeAttributes(FileWriter file, List<WebElement> elements, String attr) throws IOException {
+    private String[] writeAttributes(FileWriter file, List<WebElement> elements, String attr) throws IOException {
+        var list = new String[elements.size()];
+        int i = 0;
         for (WebElement element : elements) {
             var link = element.getAttribute(attr);
             file.write(link);
             file.write('\n');
+            list[i++] = link;
         }
+        return list;
     }
 }
