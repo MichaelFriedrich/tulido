@@ -10,7 +10,7 @@
     <packaging>jar</packaging>
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <exec.mainClass>net.picocloud.tumblr.TumblrLikeDownloader</exec.mainClass>
+        <exec.mainClass>net.picocloud.tumblr.web.TumblrBrowserCalls</exec.mainClass>
     </properties>
 
     <build>
@@ -38,7 +38,7 @@
                             <archive>
                                 <manifest>
                                     <mainClass>
-                                        net.picocloud.tumblr.TumblrLikeDownloader
+                                        net.picocloud.tumblr.web.TumblrBrowserCalls
                                     </mainClass>
                                 </manifest>
                             </archive>
@@ -91,7 +91,33 @@
             <version>5.1.1</version>
         </dependency>
 
-
+        <dependency>
+            <groupId>com.tumblr</groupId>
+            <artifactId>jumblr</artifactId>
+            <version>0.0.14-SNAPSHOT</version>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter-api</artifactId>
+            <version>5.7.2</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter-params</artifactId>
+            <version>5.7.2</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-jdk14</artifactId>
+            <version>1.7.25</version>
+        </dependency>
+        <dependency>
+            <groupId>org.jsoup</groupId>
+            <artifactId>jsoup</artifactId>
+            <version>1.14.3</version>
+        </dependency>
     </dependencies>
 
 </project>

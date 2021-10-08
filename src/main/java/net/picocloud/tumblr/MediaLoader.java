@@ -1,5 +1,6 @@
 package net.picocloud.tumblr;
 
+import net.picocloud.tumblr.web.Config;
 import org.apache.hc.client5.http.async.methods.*;
 import org.apache.hc.client5.http.impl.async.CloseableHttpAsyncClient;
 import org.apache.hc.client5.http.impl.async.HttpAsyncClients;
@@ -9,12 +10,14 @@ import org.apache.hc.core5.reactor.IOReactorConfig;
 import org.apache.hc.core5.util.Timeout;
 
 import java.io.*;
-import java.net.MalformedURLException;
-import java.net.URL;
-import java.util.ArrayList;
-import java.util.List;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
+import java.util.logging.LogManager;
 import java.util.logging.Logger;
 
 /**
@@ -24,103 +27,126 @@ public class MediaLoader {
 
     private static final Logger logger = Logger.getLogger(MediaLoader.class.getName());
 
-    final IOReactorConfig ioReactorConfig = IOReactorConfig.custom()
-            .setSoTimeout(Timeout.ofSeconds(15))
+    private static final IOReactorConfig ioReactorConfig = IOReactorConfig.custom()
+            .setSoTimeout(Timeout.ofSeconds(30))
             .build();
-
-
 
 
     /**
      * downloads all urls in file and stores these files in targetDir
-     *
+     * <p>
      * WARNING: all files in the target directory can get overwritten
      *
-     * @param file the path to the file with all the urls (one url per line)
+     * @param file      the path to the file with all the urls (one url per line)
      * @param targetDir the target directory where the downloads are stored. if the directory does not exist it gets created
      * @throws IOException if directory is not writable or cannot be created
      */
-    public void loadMediaFromFile(String file, String targetDir) throws IOException {
+    public static void loadMediaFromFile(String file, String targetDir) throws IOException {
         Config.createTargetDir(targetDir);
-
+        logger.info("Reading input file...");
         try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
-            List<String> list = new ArrayList<>();
+            Set<String> set = new HashSet<>();
             String line;
             while ((line = reader.readLine()) != null) {
-                list.add(line);
+                set.add(line);
             }
-            getMedia(targetDir, list.toArray(new String[0]));
+            logger.info("Starting download ...");
+            getMedia(targetDir, set);
         }
+        logger.info("Ready");
     }
 
 
-
+    /**
+     * max number of parallel http requests
+     */
+    private static final Semaphore semaphore = new Semaphore(20);
 
     /**
      * downloads all urls and stores the result in targetDir.
      * The download uses an async http client and can use a lot of bandwidth.
-     *
+     * <p>
      * WARNING: targetDir must exist and must be writable.
      *
      * @param targetDir the absolute path to an existing and writable directory
-     * @param urls array of urls as text
+     * @param urls      array of urls as text
      */
-    protected void getMedia(String targetDir, String... urls) {
-        if (urls == null || urls.length == 0)
+    public static void getMedia(String targetDir, Set<String> urls) {
+        if (urls == null || urls.isEmpty())
             return;
+
+
+        int size = urls.size();
+        logger.info(() -> "Downloading " + size + " files to " + targetDir);
 
         final CloseableHttpAsyncClient client = HttpAsyncClients.custom()
                 .setIOReactorConfig(ioReactorConfig)
+
                 .build();
         client.start();
-        int size = urls.length;
+
         CountDownLatch latch = new CountDownLatch(size);
 
         // create async download tasks
         for (var url : urls) {
-            createDownloadTask(targetDir, url, latch,client);
+            createDownloadTask(targetDir, url, latch, client);
         }
 
         // wait for downloads to finish
-        logger.info(() -> "Downloading " + size + " files.");
-        long time = System.currentTimeMillis();
+        waitForAllDownloads(latch);
+        client.close(CloseMode.GRACEFUL);
+        logger.info(() -> "Downloading " + size + " files finished.");
+
+    }
+
+    private static void waitForAllDownloads(CountDownLatch latch) {
+        long oldCount = latch.getCount();
+        long tc = System.currentTimeMillis();
         while (latch.getCount() > 0) {
             try {
-                latch.await(10, TimeUnit.SECONDS);
-                long count = latch.getCount();
-                if (count > 0) {
-                    float fps = ((float) (size - count)) / (System.currentTimeMillis() - time) * 1000;
+                if (!latch.await(10, TimeUnit.SECONDS)) {
+                    long count = latch.getCount();
+                    float fps = ((float) (oldCount - count)) / (System.currentTimeMillis() - tc) * 1000;
+                    oldCount = count;
+                    tc = System.currentTimeMillis();
                     logger.info(() -> latch.getCount() + " files to process. " + fps + " files per second. ETA: " + count / fps + " seconds.");
                 }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
         }
-        client.close(CloseMode.GRACEFUL);
     }
 
-    protected void createDownloadTask(String targetDir, String url, CountDownLatch latch, CloseableHttpAsyncClient client) {
-        try {
-            final SimpleHttpRequest request = SimpleRequestBuilder.get().setUri(url).build();
+    protected static void createDownloadTask(String targetDir, String url, CountDownLatch latch, CloseableHttpAsyncClient client) {
+        final String filename = targetDir + File.separator + url.substring(url.lastIndexOf("/") + 1);
+        // don't redownload existing files
+        if (Files.exists(Path.of(filename))) {
+            latch.countDown();
+            return;
+        }
+        final SimpleHttpRequest request = SimpleRequestBuilder.get().setUri(url).build();
 
+        try {
+            semaphore.acquire();
+            final long t = System.currentTimeMillis();
+            logger.fine(() -> "downloading start     : " + url);
             client.execute(
                     SimpleRequestProducer.create(request),
                     SimpleResponseConsumer.create(),
                     new FutureCallback<>() {
-                        private final URL uurl = new URL(url);
-                        private final File dir = new File(targetDir);
-
                         @Override
                         public void completed(final SimpleHttpResponse response) {
-                            String filename = uurl.getPath();
-                            filename = dir.getAbsolutePath() + File.separator + filename.substring(filename.lastIndexOf("/") + 1);
-
-                            try (FileOutputStream fos = new FileOutputStream(filename)){
+                            try (FileOutputStream fos = new FileOutputStream(filename)) {
                                 fos.write(response.getBodyBytes());
                             } catch (IOException e) {
                                 e.printStackTrace();
                             }
+                            long time = System.currentTimeMillis() - t;
+
+                            logger.fine(() -> "downloading success: " + time + "msec : " + url);
                             latch.countDown();
+                            semaphore.release();
+
                         }
 
                         @Override
@@ -128,25 +154,33 @@ public class MediaLoader {
                             logger.warning(request + "->" + ex);
                             ex.printStackTrace();
                             latch.countDown();
+                            semaphore.release();
                         }
 
                         @Override
                         public void cancelled() {
                             logger.warning(request + " cancelled");
                             latch.countDown();
+                            semaphore.release();
                         }
 
                     });
-
-        } catch (MalformedURLException e) {
-            e.printStackTrace();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            semaphore.release();
         }
     }
 
 
     public static void main(String[] args) throws IOException {
-        MediaLoader ml = new MediaLoader();
-        ml.loadMediaFromFile("pics.txt", "pics");
-        ml.loadMediaFromFile("vids.txt", "vids");
+        InputStream stream = TumblrApiCalls.class.getClassLoader().
+                getResourceAsStream("logging.properties");
+        try {
+            LogManager.getLogManager().readConfiguration(stream);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        MediaLoader.loadMediaFromFile("sabinedl/videos.txt", "sabinedl/vids");
+        MediaLoader.loadMediaFromFile("sabinedl/pics.txt", "sabinedl/pics");
     }
 }
