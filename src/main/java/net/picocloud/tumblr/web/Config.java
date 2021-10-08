@@ -1,8 +1,10 @@
-package net.picocloud.tumblr;
+package net.picocloud.tumblr.web;
 
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.chrome.ChromeDriver;
+import org.openqa.selenium.chrome.ChromeOptions;
 import org.openqa.selenium.firefox.FirefoxDriver;
+import org.openqa.selenium.firefox.FirefoxOptions;
 
 import java.io.File;
 import java.io.IOException;
@@ -22,6 +24,13 @@ public class Config {
      * destination path for downloaded files
      */
     String destPath = null;
+
+    public Config(String username, String password, String blogname) {
+        this.username = username;
+        this.password = password;
+        this.blogname = blogname;
+    }
+
     /**
      * tumblr.com user name
      */
@@ -68,7 +77,7 @@ public class Config {
 
 
     public static void printUsage() {
-        System.out.println("Usage:\n" +
+        System.err.println("Usage:\n" +
                 "java -jar tulido.jar <username> <password> <blogname> [<options> ...]\n" +
                 "Options:\n" +
                 "-pages     : do not create all like pages\n" +
@@ -164,7 +173,7 @@ public class Config {
     }
 
 
-    private static String trimPath(String path) {
+    static String trimPath(String path) {
         while (path.endsWith("."))
             path = path.substring(0,path.length()-1);
         if (path.endsWith(File.separator))
@@ -184,5 +193,6 @@ public class Config {
     public boolean isValid() {
         return valid;
     }
+
 }
 
