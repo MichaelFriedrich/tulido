@@ -7,7 +7,7 @@ This program allows you to download all your likes form your tumblr account even
 * You need to have [Google Chrome](https://www.google.de/chrome/) installed.
 * You need to have [Java 11](https://www.java.com) or above installed.
 * On Mac computers, you have to trust the chromedriver with the command:<br>
-  ``xattr -p com.apple.quarantine /usr/local/bin/chromedriver``<br>
+  ``xattr -d com.apple.quarantine /usr/local/bin/chromedriver``<br>
   with the correct path to the binary
 
 ## Usage:
