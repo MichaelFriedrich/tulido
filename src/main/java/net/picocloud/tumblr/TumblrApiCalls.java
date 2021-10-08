@@ -3,9 +3,13 @@ package net.picocloud.tumblr;
 import com.tumblr.jumblr.JumblrClient;
 import com.tumblr.jumblr.exceptions.JumblrException;
 import com.tumblr.jumblr.types.*;
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.*;
 import java.util.function.Function;
 import java.util.logging.Level;
@@ -19,13 +23,6 @@ public class TumblrApiCalls {
     private static Logger logger = null;
 
     static {
-        InputStream stream = TumblrApiCalls.class.getClassLoader().
-                getResourceAsStream("logging.properties");
-        try {
-            LogManager.getLogManager().readConfiguration(stream);
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
         logger = Logger.getLogger(TumblrApiCalls.class.getName());
     }
 
@@ -51,41 +48,54 @@ public class TumblrApiCalls {
 
 
     public static void main(String[] args) {
-
-        String blogname = "fgdia";
-        logger.info("test");
-
-        JumblrClient client = ClientFactory.instance();
-        System.out.println(getMediaUrlsFromPosts(getPagedResources(options -> client.blogPosts(blogname, options))));
-        System.out.println(getFollowedBlogNames(getPagedResources(options -> client.userFollowing(options))));
-
-/*        var urls = getBlogPostMediaUrls(blogname);
-
-        try (FileWriter fw = new FileWriter(blogname + ".txt")) {
-            for (var s : urls) {
-                fw.write(s);
-                fw.write('\n');
-            }
+        InputStream stream = TumblrApiCalls.class.getClassLoader().
+                getResourceAsStream("logging.properties");
+        try {
+            LogManager.getLogManager().readConfiguration(stream);
         } catch (IOException e) {
             e.printStackTrace();
         }
 
-*/
 
-        /*
-        Post p = client.blogPost("fgdia", 659802448333062144L);
-        System.out.println(p.getShortUrl());
-        System.out.println(p.getSourceUrl());
-        p = client.blogPost("sabinedl", 639362558612193280L);
-        System.out.println(p.getRebloggedFromId());
- */
+
+       /* logger.info(() -> {
+            return Arrays.toString(getFollowableBlognames().toArray());
+        });
+
+        */
     }
 
-    static Set<String> getFollowedBlogNames(Set<Blog> blogs) {
+    /**
+     * get all blognames the current user follows
+     *
+     * @return
+     */
+    public static Set<String> getFollowedBlogNames() {
+        JumblrClient client = ClientFactory.instance();
+        return blog2BlogName(getPagedResources(client::userFollowing));
+    }
+
+    private static Set<String> blog2BlogName(Set<Blog> blogs) {
         return blogs.stream().map(Blog::getName).collect(Collectors.toSet());
     }
 
-    static Set<String> getMediaUrlsFromPosts(Set<Post> posts) {
+    private static Set<String> user2UserName(Set<User> blogs) {
+        return blogs.stream().map(User::getName).collect(Collectors.toSet());
+    }
+
+    public static Set<String> getFollowedByUserNames(final String blogname) {
+        JumblrClient client = ClientFactory.instance();
+        return user2UserName(getPagedResources(b -> client.blogFollowers(blogname)));
+    }
+
+
+    public static Set<String> getMediaUrlsFromBlogPosts(String blogname) {
+        JumblrClient client = ClientFactory.instance();
+        var posts = getPagedResources(options -> client.blogPosts(blogname, options));
+        return getMediaUrlsFromPosts(posts);
+    }
+
+    private static Set<String> getMediaUrlsFromPosts(Set<Post> posts) {
         Set<String> set = new HashSet<>();
         for (var post : posts) {
             switch (post.getType()) {
@@ -105,18 +115,17 @@ public class TumblrApiCalls {
                     break;
                 case ANSWER:
                 default:
-                    System.out.println("Unknown post type : " + post.getType());
+                    logger.warning(() -> "Unknown post type : " + post.getType());
             }
         }
         return set;
     }
 
-
-     static <E extends Resource> Set<E> getPagedResources(Function<Map, List> function) {
+    private static <E extends Resource> Set<E> getPagedResources(Function<Map<String, ?>, List<E>> function) {
         Set<E> set = new HashSet<>();
-        Map options = new HashMap<>();
-        int offset = 0;
-        var x = function.apply(options);;
+        Map<String, Object> options = new HashMap<>();
+        Integer offset = 0;
+        var x = function.apply(options);
         while (!x.isEmpty()) {
             set.addAll(x);
 
@@ -127,9 +136,9 @@ public class TumblrApiCalls {
                 x = function.apply(options);
             } catch (JumblrException je) {
                 if (je.getResponseCode() == 429) {// limit exceed
-                    logger.info("Rate Limit reached. Waiting one minute.");
+                    logger.info("Rate Limit reached. Waiting two minutes.");
                     try {
-                        Thread.sleep(60000);
+                        Thread.sleep(2 * 60000);
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
                     }
@@ -139,6 +148,7 @@ public class TumblrApiCalls {
                 }
             }
         }
+
         return set;
     }
 
@@ -157,4 +167,35 @@ public class TumblrApiCalls {
             start = body.indexOf(token);
         }
     }
+
+
+    public static Set<String> getFollowableBlognames() {
+        var dir = Path.of("sabinedl", "pages");
+
+        Set<String> set = new HashSet<>();
+        try {
+            return Files.list(dir).map(p -> getFollowableBlognames(p)).flatMap(sets -> sets.stream()).collect(Collectors.toSet());
+        } catch (IOException e) {
+            e.printStackTrace();
+            return null;
+        }
+    }
+
+    private static Set<String> getFollowableBlognames(Path path) {
+        try {
+            if (!Files.isDirectory(path)) {
+
+                Document doc = Jsoup.parse(path.toFile(), null);
+                return doc.getElementsByClass("reblog_follow_button").stream().map(e -> e.attr("data-tumblelog-name")).collect(Collectors.toSet());
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return new HashSet<>();
+    }
+
+    public static Blog getInfo(String blogname) {
+        return ClientFactory.instance().blogInfo(blogname);
+    }
+
 }
